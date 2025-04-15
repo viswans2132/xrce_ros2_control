@@ -47,7 +47,7 @@ class OffboardControl(Node):
         # Subscribers
         self.odomSub = self.create_subscription(VehicleOdometry, '/fmu/out/vehicle_odometry', self.vehicle_odometry_callback, qos_profile_transient)
         self.relaySub = self.create_subscription(VehicleOdometry, '/fmu/in/vehicle_visual_odometry', self.relay_callback, qos_profile_transient)
-        self.posSpSub = self.create_subscription(PoseStamped, '/shafterx2/reference', self.sp_callback, qos_profile_volatile)
+        self.posSpSub = self.create_subscription(PoseStamped, '/shafterx2/command/pose', self.sp_callback, qos_profile_volatile)
         
         #Publishers
         self.posSpPub = self.create_publisher(PoseStamped, '/ref', qos_profile_volatile)
@@ -64,10 +64,10 @@ class OffboardControl(Node):
         self.startYaw = 1.0
 
         # Setpoints
-        self.posSp = np.array([1.0,1.0, 1.0])
+        self.posSp = np.array([0.0, -1.0, 1.0])
         self.quatSp = np.array([0.0, 0.0, 0.0, 1.0])
         self.velSp = np.array([0.0,0.0,0.0])
-        self.yawSp = 1.5
+        self.yawSp = 0.0
 
         # Time parameters
         self.preTime = Clock().now().nanoseconds/1E9
@@ -142,7 +142,7 @@ class OffboardControl(Node):
     def cmdloop_callback(self):
         if self.odomFlag and self.relayFlag and self.trajFlag:
             norm_distance = np.linalg.norm(self.posSp - self.curPos)
-            posSp_ = np.array([1.0,1.0,1.0])
+            posSp_ = np.array([0.0, -1.0, 1.0])
             maxNorm_ = 0.3
             if norm_distance > maxNorm_:
                 posSp_ = self.curPos + maxNorm_*(self.posSp - self.curPos)/norm_distance

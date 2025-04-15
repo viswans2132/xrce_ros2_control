@@ -18,8 +18,7 @@ from px4_msgs.msg import OffboardControlMode, TrajectorySetpoint, VehicleCommand
 from std_msgs.msg import Header, Int8
 from sensor_msgs.msg import PointCloud2
 import sensor_msgs_py.point_cloud2 as pc2
-# import ros_numpy
-# import pcl
+import ros2_numpy
 
 
 
@@ -77,10 +76,10 @@ class OffboardControl(Node):
         self.publisher_points = self.create_publisher(PointCloud2, '/reduced_points', qos_profile_re_vo)
 
         # Constants and cutoff values
-        self.gravity = np.array([0, 0, -0.0])
+        self.gravity = np.array([0, 0, -10.0])
         self.max_acc = 5
         self.max_throttle = 0.7
-        timer_period = 0.2  # seconds
+        timer_period = 0.01  # seconds
         self.timer = self.create_timer(timer_period, self.cmdloop_callback)
 
 
@@ -93,9 +92,9 @@ class OffboardControl(Node):
         self.start_yaw = 1.0
 
         # Setpoints
-        self.pos_sp = np.array([0.0, -2.0, -1.0])
+        self.pos_sp = np.array([0.0, 0.0, -1.0])
         self.vel_sp = np.array([0.0, 0.0, 0.0])
-        self.yaw_sp = 1.0
+        self.yaw_sp = 0.0
         self.home_pos = np.array([0, 0, 0.05])
 
         # Storage Variables
@@ -135,6 +134,7 @@ class OffboardControl(Node):
         self.home = False
         self.trajFlag = False
         self.landFlag = False
+        self.takeOffFlag = False
 
 
         print("Sleeping")
@@ -167,6 +167,9 @@ class OffboardControl(Node):
         self.cur_vel = np.array([msg.velocity[0],msg.velocity[1],msg.velocity[2]])
         self.cur_orien = np.array([msg.q[1], msg.q[2], msg.q[3], msg.q[0]])
         self.yaw = euler_from_quaternion([msg.q[1], msg.q[2], msg.q[3], msg.q[0]])[2]
+        if self.cur_pose[2] < -0.5:
+            self.takeOffFlag = True
+            print("Takeoff detected")
 
     def lio_callback(self, msg):
         # self.cur_pose = np.array([msg.pose.pose.position.x, -msg.pose.pose.position.y, -msg.pose.pose.position.z])
@@ -206,7 +209,7 @@ class OffboardControl(Node):
         command_msg_arm.source_system = 1
         command_msg_arm.from_external = True
         self.publisher_command.publish(command_msg_arm)
-        # print('Trying to arm')
+        print('Trying to arm')
 
         if self.armed==2:
             # Set to offboard mode
@@ -266,8 +269,32 @@ class OffboardControl(Node):
         # offboard_msg.direct_actuator=False
         # offboard_msg.actuator=False
         self.publisher_offboard_mode.publish(offboard_msg)
-    
+
     def pointcloud_callback(self, msg):
+        pc_struct = ros2_numpy.numpify(msg)
+        points = pc_struct['xyz']
+
+        distances = np.linalg.norm(points, axis=1)
+        points = points[(distances > 0.75) & (distances < 2.75)]
+
+        voxel_size = 0.75
+        discrete_coords = np.floor(points/voxel_size).astype(np.int32)
+        _, unique_indices = np.unique(discrete_coords, axis=0, return_index=True)
+
+        points = points[unique_indices]
+        self.points_array = np.array([points[:,0], -points[:,1], -points[:,2]]).T        
+
+        if len(self.points_array) < 1:
+            self.consFlag = False
+        else:
+            self.genConsMatrix()
+
+        pcl = PointCloud2()
+        pcl = pc2.create_cloud_xyz32(msg.header, points.tolist())
+        self.publisher_points.publish(pcl)
+
+    
+    def pointcloud_callback12343(self, msg):
         # Convert the PointCloud2 message to a list of points
         points = list(pc2.read_points(msg, field_names=("x", "y", "z"), skip_nans=True))
         
@@ -276,26 +303,20 @@ class OffboardControl(Node):
         self.points_array = (np.stack([self.points_array['x'], self.points_array['y'], self.points_array['z']]).astype(np.float32)).T
         self.points_array = self.points_array[~np.isnan(self.points_array).any(axis=1)]
 
-        # print(self.points_array.shape)
-        # print(self.points_array[0])
-        # print(self.points_array[-1])
-
         # self.points_array[:,1] = -self.points_array[:,1]
         # self.points_array[:,2] = -self.points_array[:,2]
         
         # Find the Euclidean distance between the point and the body.
         distances = np.linalg.norm(self.points_array, axis=1)
-        self.points_array = self.points_array[(distances <= 1.50) & (distances >= 0.30)]
-        # self.points_array = self.points_array[distances >= 0.30]
-        self.points_array = self.points_array[::20]
-        print(self.points_array.shape)
+        self.points_array = self.points_array[(distances <= 1.50) & (distances >= 0.75)]
+
+        # self.points_array = self.points_array[::20]
+        # print(self.points_array.shape)
 
         points = PointCloud2()
-        # points.header = msg.header
-        # points.points = self.points_array.tolist()
         points = pc2.create_cloud_xyz32(msg.header, self.points_array.tolist())
 
-        self.publisher_points.publish(points)
+        # self.publisher_points.publish(points)
         
 
         if len(self.points_array) < 1:
@@ -314,12 +335,14 @@ class OffboardControl(Node):
 
         else:
             self.A = -2*rotated_points
-            self.b = -2.5*(np.sum(rotated_points**2, 1) - 0.52)
+            self.b = -1.5*(np.sum(rotated_points**2, 1) - 2.56)
 
-            self.consFlag = True
+            if self.takeOffFlag:
+                self.consFlag = True
 
 
     def safety_filter(self, desVel):
+        print("Safety ON")
         P = np.eye(3)
         u = cp.Variable(3)
 
@@ -332,7 +355,7 @@ class OffboardControl(Node):
                 val = u.value
 
                 try:
-                    val = np.maximum(-np.array([0.5, 0.5, 0.5]), np.minimum(np.array([0.5, 0.5, 0.5]), val))
+                    val = np.maximum(-np.array([0.3, 0.3, 0.3]), np.minimum(np.array([0.3, 0.3, 0.3]), val))
                 except TypeError:
                     print("Safety filter returned None")
                     val = np.array([0.0, 0.0, 0.0])
@@ -368,7 +391,7 @@ class OffboardControl(Node):
         if self.consFlag:
             desVel = self.safety_filter(desVel)
         
-        print(f"value: {desVel[0]:.3f}: {desVel[1]:.3f}:  {desVel[2]:.3f}")
+        # print(f"value: {desVel[0]:.3f}: {desVel[1]:.3f}:  {desVel[2]:.3f}")
 
         derVel = ((self.cur_vel - desVel) - self.errVel)/self.dt
         self.errVel = self.cur_vel - desVel
@@ -472,7 +495,7 @@ class OffboardControl(Node):
                     self.att_cmd.q_d[3] = quat_des[2]
                     
                     self.att_cmd.thrust_body[2] = thrust
-                    # print("thrust: {:.3f}".format(thrust))
+                    print("thrust: {:.3f}".format(thrust))
                     # print(f"value: {des_a[0]:.3f}: {des_a[1]:.3f}:  {des_a[2]:.3f}")
 
                     self.publisher_attitude.publish(self.att_cmd)

@@ -73,15 +73,15 @@ class DlioOdom(Node):
 
 	def range_cb(self, msg):
 		if not self.rangeFlag:
-			self.rangeFlag =  True
-			# pass
+			# self.rangeFlag =  True
+			pass
 		range = msg.range
 		if self.lioFlag:
 			[roll, pitch, yaw] = euler_from_quaternion(self.quat)
 		else:
 			roll = 0.0
 			pitch = 0.0
-		self.odom_msg.position[2] = -msg.range*np.cos(roll)*np.cos(pitch)
+		# self.odom_msg.position[2] = -msg.range*np.cos(roll)*np.cos(pitch)
 
 
 def timesync(stamp):
