@@ -47,10 +47,10 @@ class OffboardControl(Node):
         # Subscribers
         self.odomSub = self.create_subscription(VehicleOdometry, '/fmu/out/vehicle_odometry', self.vehicle_odometry_callback, qos_profile_transient)
         self.relaySub = self.create_subscription(VehicleOdometry, '/fmu/in/vehicle_visual_odometry', self.relay_callback, qos_profile_transient)
-        self.posSpSub = self.create_subscription(PoseStamped, '/shafterx2/command/pose', self.sp_callback, qos_profile_volatile)
+        self.posSpSub = self.create_subscription(PoseStamped, '/shafterx2/command/pose', self.sp_callback, qos_profile_volatile_reliable)
         
         #Publishers
-        self.posSpPub = self.create_publisher(PoseStamped, '/ref', qos_profile_volatile)
+        self.posSpPub = self.create_publisher(PoseStamped, '/ref', qos_profile_volatile_reliable)
 
 
         timerPeriod = 0.02  # seconds
@@ -64,7 +64,7 @@ class OffboardControl(Node):
         self.startYaw = 1.0
 
         # Setpoints
-        self.posSp = np.array([0.0, -1.0, 1.0])
+        self.posSp = np.array([0.0, 0.0, 1.0])
         self.quatSp = np.array([0.0, 0.0, 0.0, 1.0])
         self.velSp = np.array([0.0,0.0,0.0])
         self.yawSp = 0.0
@@ -117,9 +117,12 @@ class OffboardControl(Node):
 
     def sp_callback(self, msg):
         self.posSp[0] = msg.pose.position.x
-        self.posSp[1] = msg.pose.positionen.y
+        self.posSp[1] = msg.pose.position.y
+        # self.posSp[2] = msg.pose.position.z
         quat = np.array([msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z, msg.pose.orientation.w])
         self.yawSp = euler_from_quaternion(quat)[2]
+        print("New waypoint received")
+        print(self.posSp)
 
     def set_offboard(self):
         pass
@@ -142,7 +145,7 @@ class OffboardControl(Node):
     def cmdloop_callback(self):
         if self.odomFlag and self.relayFlag and self.trajFlag:
             norm_distance = np.linalg.norm(self.posSp - self.curPos)
-            posSp_ = np.array([0.0, -1.0, 1.0])
+            posSp_ = np.array([0.0, 0.0, 1.0])
             maxNorm_ = 0.3
             if norm_distance > maxNorm_:
                 posSp_ = self.curPos + maxNorm_*(self.posSp - self.curPos)/norm_distance

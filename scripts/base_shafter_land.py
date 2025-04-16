@@ -61,10 +61,10 @@ class OffboardControl(Node):
         # Subscribers
         self.odometry = self.create_subscription(VehicleOdometry, '/fmu/out/vehicle_odometry', self.vehicle_odometry_callback, qos_profile)
         self.lio_odom = self.create_subscription(Odometry, '/shafterx2/odometry/imu', self.lio_callback, qos_profile_be_vo)
-        self.posSpSub = self.create_subscription(PoseStamped, '/ref', self.sp_position_callback, qos_profile_volatile)
+        self.posSpSub = self.create_subscription(PoseStamped, '/ref', self.sp_position_callback, qos_profile_re_vo)
         self.mode_sub = self.create_subscription(VehicleControlMode, '/fmu/out/vehicle_control_mode', self.vehicle_control_mode_callback, qos_profile)
-        self.landSub = self.create_subscription(String, '/shafterx2/land', self.land_callback, qos_profile)
-        self.takeOffSub = self.create_subscription(String, '/shafterx2/takeoff', self.start_callback, qos_profile)
+        self.landSub = self.create_subscription(String, '/shafterx2/land', self.land_callback, qos_profile_re_vo)
+        self.takeOffSub = self.create_subscription(String, '/shafterx2/takeoff', self.start_callback, qos_profile_re_vo)
         self.lidarSub = self.create_subscription(PointCloud2, '/shafterx2/ouster/points', self.pointcloud_callback, qos_profile_re_vo)
 
         #Publishers
@@ -147,7 +147,7 @@ class OffboardControl(Node):
 
     def vehicle_control_mode_callback(self, msg):
         self.offboard_mode = msg.flag_control_offboard_enabled
-        self.position_mode = msg.flag_control_position_enabled
+        self.position_mode = msg.flag_control_manual_enabled
  
     def vehicle_status_callback(self, msg):
         if msg.arming_state == 2 and self.armed != 2:
@@ -166,9 +166,10 @@ class OffboardControl(Node):
         self.cur_vel = np.array([msg.velocity[0],msg.velocity[1],msg.velocity[2]])
         self.cur_orien = np.array([msg.q[1], msg.q[2], msg.q[3], msg.q[0]])
         self.yaw = euler_from_quaternion([msg.q[1], msg.q[2], msg.q[3], msg.q[0]])[2]
-        if self.cur_pose[2] < -0.5:
+        if self.cur_pose[2] < -0.75:
+            if not self.takeOffFlag:
+                print("Takeoff detected")
             self.takeOffFlag = True
-            print("Takeoff detected")
 
     def lio_callback(self, msg):
         if not self.lioFlag:
@@ -176,6 +177,7 @@ class OffboardControl(Node):
         self.lioFlag = True
 
     def start_callback(self, msg):
+        #print(msg.data)
         self.controlFlag = True
         self.landFlag = False
 
@@ -184,7 +186,7 @@ class OffboardControl(Node):
         command_msg_mode = VehicleCommand()
         command_msg_mode.timestamp = int(Clock().now().nanoseconds / 1000)
         command_msg_mode.param1 = 1.0
-        command_msg_mode.param2 = 3.0
+        command_msg_mode.param2 = 1.0
         command_msg_mode.command = VehicleCommand.VEHICLE_CMD_DO_SET_MODE
         command_msg_mode.target_component = 1
         command_msg_mode.target_system = 1
@@ -470,7 +472,7 @@ class OffboardControl(Node):
                     pass
 
             else:
-                print(f"Controller waiting: \nDLIO: {self.lioFlag}, \nFMUO: {self.odomFlag}, \nControl: {self.controlFlag}")
+                print(f"\n\nController waiting: \nDLIO: {self.lioFlag}, \nFMUO: {self.odomFlag}, \nControl: {self.controlFlag}")
                 pass
 
 
