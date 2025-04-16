@@ -112,6 +112,11 @@ class OffboardControl(Node):
         self.safetyRadius = 1.6
         self.consFlag = False
 
+        # Velocity clipping
+        self.maxXVel = 0.5
+        self.maxYVel = 0.5
+        self.maxZVel = 0.3
+
         # Gains
         self.Kpos = np.array([-0.6, -0.6, -1.2])
         self.Kvel = np.array([-0.5, -0.5, -1.0])
@@ -338,7 +343,7 @@ class OffboardControl(Node):
                 val = u.value
 
                 try:
-                    val = np.maximum(-np.array([0.3, 0.3, 0.3]), np.minimum(np.array([0.3, 0.3, 0.3]), val))
+                    val = np.maximum(-np.array([self.maxXVel, self.maxYVel, self.maxZVel]), np.minimum(np.array([self.maxXVel, self.maxYVel, self.maxZVel]), val))
                 except TypeError:
                     print("Safety filter returned None")
                     val = np.array([0.0, 0.0, 0.0])

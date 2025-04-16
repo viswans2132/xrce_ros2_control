@@ -118,7 +118,7 @@ class OffboardControl(Node):
     def sp_callback(self, msg):
         self.posSp[0] = msg.pose.position.x
         self.posSp[1] = msg.pose.position.y
-        # self.posSp[2] = msg.pose.position.z
+        self.posSp[2] = msg.pose.position.z
         quat = np.array([msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z, msg.pose.orientation.w])
         self.yawSp = euler_from_quaternion(quat)[2]
         print("New waypoint received")
@@ -146,7 +146,7 @@ class OffboardControl(Node):
         if self.odomFlag and self.relayFlag and self.trajFlag:
             norm_distance = np.linalg.norm(self.posSp - self.curPos)
             posSp_ = np.array([0.0, 0.0, 1.0])
-            maxNorm_ = 0.3
+            maxNorm_ = 1.0
             if norm_distance > maxNorm_:
                 posSp_ = self.curPos + maxNorm_*(self.posSp - self.curPos)/norm_distance
             else:
