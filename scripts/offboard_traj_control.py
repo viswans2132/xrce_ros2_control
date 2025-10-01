@@ -39,6 +39,12 @@ class OffboardControl(Node):
             depth=1
         )
         qos_profile_2 = QoSProfile(depth=1)
+        qos_profile_volatile_reliable = QoSProfile(
+            reliability=QoSReliabilityPolicy.RELIABLE,
+            durability=QoSDurabilityPolicy.VOLATILE,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1
+        )
 
         self.nav_state = VehicleStatus.NAVIGATION_STATE_MAX
         self.pos = [0,0,0]
@@ -92,6 +98,7 @@ class OffboardControl(Node):
         self.odom_sub = self.create_subscription(VehicleOdometry, '/fmu/out/vehicle_odometry', self.vehicle_odometry_callback, qos_profile)
         self.mode_sub = self.create_subscription(VehicleControlMode, '/fmu/out/vehicle_control_mode', self.vehicle_control_mode_callback, qos_profile)
         self.takeOff_sub = self.create_subscription(String, '/takeoff', self.start_callback)
+        self.pos_sp_sub = self.create_subscription(Pose, '/ref', self.pos_sp_callback, qos_profile_volatile_reliable)
 
         if HW_TEST:
             self.relay_sub = self.create_subscription(VehicleOdometry, '/fmu/in/vehicle_visual_odometry', self.relay_callback)
@@ -111,18 +118,17 @@ class OffboardControl(Node):
         self.mode()
  
  
+    def pos_sp_callback(self, msg):
+        # print(msg.flag_control_offboard_enabled)
+        self.pos_sp[0] = msg.position.x
+        self.pos_sp[1] = -msg.position.y
+        self.pos_sp[2] = -msg.position.z
+
     def vehicle_control_mode_callback(self, msg):
         # print(msg.flag_control_offboard_enabled)
         self.offboard_mode = msg.flag_control_offboard_enabled
+        self.armed = msg.flag_armed
         print(['offboard:',msg.flag_control_offboard_enabled])
- 
-    def vehicle_status_callback(self, msg):
-        # TODO: handle NED->ENU transformation
-        #print("NAV_STATUS: ", msg.nav_state)
-        #print("  - offboard status: ", VehicleStatus.NAVIGATION_STATE_OFFBOARD)
-        self.nav_state = msg.nav_state
-        self.armed = msg.arming_state
-        print(['armed:',msg.arming_state])
 
     def vehicle_odometry_callback(self, msg):
         if self.odomFlag == False:
