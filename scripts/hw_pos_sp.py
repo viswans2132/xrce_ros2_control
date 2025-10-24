@@ -7,14 +7,11 @@ import rclpy
 import numpy as np
 from tf_transformations import *
 import time
-import mavros
 from rclpy.node import Node
 from rclpy.clock import Clock
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy, QoSDurabilityPolicy
 
 from px4_msgs.msg import OffboardControlMode, TrajectorySetpoint, VehicleCommand, VehicleStatus, VehicleOdometry, VehicleAttitudeSetpoint, VehicleControlMode, VehicleLocalPosition
-from mavros_msgs.srv import CommandBool, SetMode
-from mavros_msgs.msg import Thrust, State
 from nav_msgs.msg import Odometry, Path
 from geometry_msgs.msg import Point, Pose, PoseStamped, Twist, TwistStamped, Vector3
 from std_msgs.msg import Int8
@@ -87,7 +84,6 @@ class OffboardControl(Node):
         self.odomFlag = False
         self.trajFlag = False
         self.home = False
-        self.state = State()
 
         self.takeoffThreshold = 0.75
 
@@ -109,9 +105,10 @@ class OffboardControl(Node):
         self.yaw = -euler_from_quaternion([msg.q[1], msg.q[2], msg.q[3], msg.q[0]])[2]
         if self.relayFlag == False:
             self.odomFlag = True
-            print('Odometry received')
+            # print('Odometry received')
         if self.curPos[2] > self.takeoffThreshold and not self.trajFlag:
             self.trajFlag = True
+            print("Takeoff Detected")
 
 
 
@@ -146,7 +143,7 @@ class OffboardControl(Node):
         if self.odomFlag and self.relayFlag and self.trajFlag:
             norm_distance = np.linalg.norm(self.posSp - self.curPos)
             posSp_ = np.array([0.0, 0.0, 1.0])
-            maxNorm_ = 1.0
+            maxNorm_ = 0.5
             if norm_distance > maxNorm_:
                 posSp_ = self.curPos + maxNorm_*(self.posSp - self.curPos)/norm_distance
             else:
