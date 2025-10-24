@@ -7,14 +7,11 @@ import rclpy
 import numpy as np
 from tf_transformations import *
 import time
-import mavros
 from rclpy.node import Node
 from rclpy.clock import Clock
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy, QoSDurabilityPolicy
 
 from px4_msgs.msg import OffboardControlMode, TrajectorySetpoint, VehicleCommand, VehicleStatus, VehicleOdometry, VehicleAttitudeSetpoint, VehicleControlMode, VehicleLocalPosition
-from mavros_msgs.srv import CommandBool, SetMode
-from mavros_msgs.msg import Thrust, State
 from nav_msgs.msg import Odometry, Path
 from geometry_msgs.msg import Point, Pose, PoseStamped, Twist, TwistStamped, Vector3
 from std_msgs.msg import Int8
@@ -47,10 +44,10 @@ class OffboardControl(Node):
         # Subscribers
         self.odomSub = self.create_subscription(VehicleOdometry, '/fmu/out/vehicle_odometry', self.vehicle_odometry_callback, qos_profile_transient)
         self.relaySub = self.create_subscription(VehicleOdometry, '/fmu/in/vehicle_visual_odometry', self.relay_callback, qos_profile_transient)
-        self.posSpSub = self.create_subscription(PoseStamped, '/shafterx2/reference', self.sp_callback, qos_profile_volatile)
+        self.posSpSub = self.create_subscription(PoseStamped, '/shafterx2/command/pose', self.sp_callback, qos_profile_volatile_reliable)
         
         #Publishers
-        self.posSpPub = self.create_publisher(PoseStamped, '/ref', qos_profile_volatile)
+        self.posSpPub = self.create_publisher(PoseStamped, '/ref', qos_profile_volatile_reliable)
 
 
         timerPeriod = 0.02  # seconds
@@ -64,10 +61,10 @@ class OffboardControl(Node):
         self.startYaw = 1.0
 
         # Setpoints
-        self.posSp = np.array([1.0,1.0, 1.0])
+        self.posSp = np.array([0.0, 0.0, 1.0])
         self.quatSp = np.array([0.0, 0.0, 0.0, 1.0])
         self.velSp = np.array([0.0,0.0,0.0])
-        self.yawSp = 1.5
+        self.yawSp = 0.0
 
         # Time parameters
         self.preTime = Clock().now().nanoseconds/1E9
@@ -87,7 +84,6 @@ class OffboardControl(Node):
         self.odomFlag = False
         self.trajFlag = False
         self.home = False
-        self.state = State()
 
         self.takeoffThreshold = 0.75
 
@@ -109,17 +105,21 @@ class OffboardControl(Node):
         self.yaw = -euler_from_quaternion([msg.q[1], msg.q[2], msg.q[3], msg.q[0]])[2]
         if self.relayFlag == False:
             self.odomFlag = True
-            print('Odometry received')
+            # print('Odometry received')
         if self.curPos[2] > self.takeoffThreshold and not self.trajFlag:
             self.trajFlag = True
+            print("Takeoff Detected")
 
 
 
     def sp_callback(self, msg):
         self.posSp[0] = msg.pose.position.x
-        self.posSp[1] = msg.pose.positionen.y
+        self.posSp[1] = msg.pose.position.y
+        self.posSp[2] = msg.pose.position.z
         quat = np.array([msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z, msg.pose.orientation.w])
         self.yawSp = euler_from_quaternion(quat)[2]
+        print("New waypoint received")
+        print(self.posSp)
 
     def set_offboard(self):
         pass
@@ -142,8 +142,8 @@ class OffboardControl(Node):
     def cmdloop_callback(self):
         if self.odomFlag and self.relayFlag and self.trajFlag:
             norm_distance = np.linalg.norm(self.posSp - self.curPos)
-            posSp_ = np.array([1.0,1.0,1.0])
-            maxNorm_ = 0.3
+            posSp_ = np.array([0.0, 0.0, 1.0])
+            maxNorm_ = 0.5
             if norm_distance > maxNorm_:
                 posSp_ = self.curPos + maxNorm_*(self.posSp - self.curPos)/norm_distance
             else:

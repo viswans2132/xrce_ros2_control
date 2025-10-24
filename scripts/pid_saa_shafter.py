@@ -376,7 +376,7 @@ class OffboardControl(Node):
                 elif self.arm_flag==False:
                     self.arm_uav() # Use this only in simulation. NEVER USE THIS IN REAL TIME.
                     # self.mode()
-                    # print("Not armed yet")
+                    print("Not armed yet")
                     pass
 
             else:

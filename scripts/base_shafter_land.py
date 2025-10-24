@@ -15,11 +15,10 @@ from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy, QoSDur
 from geometry_msgs.msg import Point, Pose, PoseStamped, Twist, TwistStamped, Vector3
 from nav_msgs.msg import Odometry
 from px4_msgs.msg import OffboardControlMode, TrajectorySetpoint, VehicleCommand, VehicleStatus, VehicleOdometry, VehicleAttitudeSetpoint, VehicleControlMode, VehicleLocalPosition
-from std_msgs.msg import Header, Int8
+from std_msgs.msg import Header, Int8, String
 from sensor_msgs.msg import PointCloud2
 import sensor_msgs_py.point_cloud2 as pc2
-# import ros_numpy
-# import pcl
+import ros2_numpy
 
 
 
@@ -60,13 +59,12 @@ class OffboardControl(Node):
             qos_profile)
 
         # Subscribers
-        # self.global_position = self.create_subscription(VehicleLocalPosition, '/fmu/out/vehicle_local_position', self.vehicle_position_callback, qos_profile)
         self.odometry = self.create_subscription(VehicleOdometry, '/fmu/out/vehicle_odometry', self.vehicle_odometry_callback, qos_profile)
         self.lio_odom = self.create_subscription(Odometry, '/shafterx2/odometry/imu', self.lio_callback, qos_profile_be_vo)
-        self.posSpSub = self.create_subscription(PoseStamped, '/ref', self.sp_position_callback, qos_profile_volatile)
-        # self.setpoint_position = self.create_subscription(VehicleLocalPosition, '/new_pose', self.sp_position_callback, qos_profile)
+        self.posSpSub = self.create_subscription(PoseStamped, '/ref', self.sp_position_callback, qos_profile_re_vo)
         self.mode_sub = self.create_subscription(VehicleControlMode, '/fmu/out/vehicle_control_mode', self.vehicle_control_mode_callback, qos_profile)
-        self.landSub = self.create_subscription(Int8, '/safety_land', self.land_callback, qos_profile)
+        self.landSub = self.create_subscription(String, '/shafterx2/land', self.land_callback, qos_profile_re_vo)
+        self.takeOffSub = self.create_subscription(String, '/shafterx2/takeoff', self.start_callback, qos_profile_re_vo)
         self.lidarSub = self.create_subscription(PointCloud2, '/shafterx2/ouster/points', self.pointcloud_callback, qos_profile_re_vo)
 
         #Publishers
@@ -77,10 +75,10 @@ class OffboardControl(Node):
         self.publisher_points = self.create_publisher(PointCloud2, '/reduced_points', qos_profile_re_vo)
 
         # Constants and cutoff values
-        self.gravity = np.array([0, 0, -0.0])
+        self.gravity = np.array([0, 0, -10.0])
         self.max_acc = 5
         self.max_throttle = 0.7
-        timer_period = 0.2  # seconds
+        timer_period = 0.01  # seconds
         self.timer = self.create_timer(timer_period, self.cmdloop_callback)
 
 
@@ -93,9 +91,9 @@ class OffboardControl(Node):
         self.start_yaw = 1.0
 
         # Setpoints
-        self.pos_sp = np.array([0.0, -2.0, -1.0])
+        self.pos_sp = np.array([0.0, 0.0, -1.0])
         self.vel_sp = np.array([0.0, 0.0, 0.0])
-        self.yaw_sp = 1.0
+        self.yaw_sp = 0.0
         self.home_pos = np.array([0, 0, 0.05])
 
         # Storage Variables
@@ -111,13 +109,19 @@ class OffboardControl(Node):
         self.points_array = np.array([])
         self.A = np.array([])
         self.b = np.array([])
+        self.safetyRadius = 1.6
         self.consFlag = False
+
+        # Velocity clipping
+        self.maxXVel = 0.5
+        self.maxYVel = 0.5
+        self.maxZVel = 0.3
 
         # Gains
         self.Kpos = np.array([-0.6, -0.6, -1.2])
         self.Kvel = np.array([-0.5, -0.5, -1.0])
         self.Kder = np.array([-0.0, -0.0, -0.0])
-        self.Kint = np.array([-0.0, -0.0, -0.4])
+        self.Kint = np.array([-0.1, -0.1, -0.4])
         self.norm_thrust_const = 0.155
 
         # Msg Variables
@@ -130,11 +134,14 @@ class OffboardControl(Node):
         self.odomFlag = False
         self.lioFlag = False
         self.offboard_mode = False
+        self.position_mode = False
         self.arm_flag = False
         self.mission_complete = False
         self.home = False
         self.trajFlag = False
         self.landFlag = False
+        self.takeOffFlag = False
+        self.controlFlag = False
 
 
         print("Sleeping")
@@ -145,6 +152,7 @@ class OffboardControl(Node):
 
     def vehicle_control_mode_callback(self, msg):
         self.offboard_mode = msg.flag_control_offboard_enabled
+        self.position_mode = msg.flag_control_manual_enabled
  
     def vehicle_status_callback(self, msg):
         if msg.arming_state == 2 and self.armed != 2:
@@ -153,35 +161,48 @@ class OffboardControl(Node):
         self.nav_state = msg.nav_state
         self.armed = msg.arming_state
 
-    def vehicle_position_callback(self, msg):
-        # self.cur_pose = np.array([msg.x,msg.y,msg.z])
-        # self.cur_vel = np.array([msg.vx,msg.vy,msg.vz])
-        pass
 
     def vehicle_odometry_callback(self, msg):
         if self.odomFlag == False:
-            # self.pos_sp[0] = msg.position[0]
-            # self.pos_sp[1] = msg.position[1]
+            self.pos_sp[0] = msg.position[0]
+            self.pos_sp[1] = msg.position[1]
             self.odomFlag = True
         self.cur_pose = np.array([msg.position[0],msg.position[1],msg.position[2]])
         self.cur_vel = np.array([msg.velocity[0],msg.velocity[1],msg.velocity[2]])
         self.cur_orien = np.array([msg.q[1], msg.q[2], msg.q[3], msg.q[0]])
         self.yaw = euler_from_quaternion([msg.q[1], msg.q[2], msg.q[3], msg.q[0]])[2]
+        if self.cur_pose[2] < -0.75:
+            if not self.takeOffFlag:
+                print("Takeoff detected")
+            self.takeOffFlag = True
 
     def lio_callback(self, msg):
-        # self.cur_pose = np.array([msg.pose.pose.position.x, -msg.pose.pose.position.y, -msg.pose.pose.position.z])
-        # self.cur_vel = np.array([msg.twist.twist.linear.x, -msg.twist.twist.linear.y, -msg.twist.twist.linear.z])
-        # self.yaw = euler_from_quaternion([msg.pose.pose.orientation.x, msg.pose.pose.orientation.y, 
-        #             msg.pose.pose.orientation.z, msg.pose.pose.orientation.w])[2]
         if not self.lioFlag:
             print("Lio received")
         self.lioFlag = True
 
+    def start_callback(self, msg):
+        #print(msg.data)
+        self.controlFlag = True
+        self.landFlag = False
+
+    def set_position(self):
+        # Set to position control mode
+        command_msg_mode = VehicleCommand()
+        command_msg_mode.timestamp = int(Clock().now().nanoseconds / 1000)
+        command_msg_mode.param1 = 1.0
+        command_msg_mode.param2 = 1.0
+        command_msg_mode.command = VehicleCommand.VEHICLE_CMD_DO_SET_MODE
+        command_msg_mode.target_component = 1
+        command_msg_mode.target_system = 1
+        command_msg_mode.source_component = 1
+        command_msg_mode.source_system = 1
+        command_msg_mode.from_external = True
+        # print("Setting Position Mode")
+        self.publisher_command.publish(command_msg_mode)
+
     def land_callback(self, msg):
-        # if not self.landFlag:
-        #     self.landTime = Clock().now().nanoseconds/1E9
         self.landFlag = True
-        self.set_land()
         print('Landing')
 
     def sp_position_callback(self, msg):
@@ -194,37 +215,38 @@ class OffboardControl(Node):
         print(self.pos_sp)
 
     def arm_uav(self):
-        # Set to arm
-        command_msg_arm = VehicleCommand()
-        command_msg_arm.timestamp = int(Clock().now().nanoseconds / 1000)
-        command_msg_arm.param1 = 1.0
-        command_msg_arm.param2 = 0.0
-        command_msg_arm.command = VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM
-        command_msg_arm.target_component = 1
-        command_msg_arm.target_system = 1
-        command_msg_arm.source_component = 1
-        command_msg_arm.source_system = 1
-        command_msg_arm.from_external = True
-        self.publisher_command.publish(command_msg_arm)
-        # print('Trying to arm')
+        if self.position_mode == False and self.offboard_mode == False:
+            self.set_position()
+        else:
+            # Set to arm
+            command_msg_arm = VehicleCommand()
+            command_msg_arm.timestamp = int(Clock().now().nanoseconds / 1000)
+            command_msg_arm.param1 = 1.0
+            command_msg_arm.param2 = 0.0
+            command_msg_arm.command = VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM
+            command_msg_arm.target_component = 1
+            command_msg_arm.target_system = 1
+            command_msg_arm.source_component = 1
+            command_msg_arm.source_system = 1
+            command_msg_arm.from_external = True
+            self.publisher_command.publish(command_msg_arm)
+            print('Trying to arm')
 
-        if self.armed==2:
-            # Set to offboard mode
-            command_msg_mode = VehicleCommand()
-            command_msg_mode.timestamp = int(Clock().now().nanoseconds / 1000)
-            command_msg_mode.param1 = 1.0
-            command_msg_mode.param2 = 6.0
-            command_msg_mode.command = VehicleCommand.VEHICLE_CMD_DO_SET_MODE
-            command_msg_mode.target_component = 1
-            command_msg_mode.target_system = 1
-            command_msg_mode.source_component = 1
-            command_msg_mode.source_system = 1
-            command_msg_mode.from_external = True
-            # print("Setting Arm")
-            self.publisher_command.publish(command_msg_mode)
+            if self.armed==2:
+                # Set to offboard mode
+                command_msg_mode = VehicleCommand()
+                command_msg_mode.timestamp = int(Clock().now().nanoseconds / 1000)
+                command_msg_mode.param1 = 1.0
+                command_msg_mode.param2 = 6.0
+                command_msg_mode.command = VehicleCommand.VEHICLE_CMD_DO_SET_MODE
+                command_msg_mode.target_component = 1
+                command_msg_mode.target_system = 1
+                command_msg_mode.source_component = 1
+                command_msg_mode.source_system = 1
+                command_msg_mode.from_external = True
+                # print("Setting offboard")
+                self.publisher_command.publish(command_msg_mode)
 
-    def set_manual(self):
-        pass
 
     def set_land(self):
         # Set to arm
@@ -266,42 +288,29 @@ class OffboardControl(Node):
         # offboard_msg.direct_actuator=False
         # offboard_msg.actuator=False
         self.publisher_offboard_mode.publish(offboard_msg)
-    
+
     def pointcloud_callback(self, msg):
-        # Convert the PointCloud2 message to a list of points
-        points = list(pc2.read_points(msg, field_names=("x", "y", "z"), skip_nans=True))
-        
-        # Convert the list of points to a Numpy array and downsample it by a factor of 20
-        self.points_array = np.array(points)
-        self.points_array = (np.stack([self.points_array['x'], self.points_array['y'], self.points_array['z']]).astype(np.float32)).T
-        self.points_array = self.points_array[~np.isnan(self.points_array).any(axis=1)]
+        pc_struct = ros2_numpy.numpify(msg)
+        points = pc_struct['xyz']
 
-        # print(self.points_array.shape)
-        # print(self.points_array[0])
-        # print(self.points_array[-1])
+        distances = np.linalg.norm(points, axis=1)
+        points = points[(distances > 0.75) & (distances < 2.75)]
 
-        # self.points_array[:,1] = -self.points_array[:,1]
-        # self.points_array[:,2] = -self.points_array[:,2]
-        
-        # Find the Euclidean distance between the point and the body.
-        distances = np.linalg.norm(self.points_array, axis=1)
-        self.points_array = self.points_array[(distances <= 1.50) & (distances >= 0.30)]
-        # self.points_array = self.points_array[distances >= 0.30]
-        self.points_array = self.points_array[::20]
-        print(self.points_array.shape)
+        voxel_size = 0.75
+        discrete_coords = np.floor(points/voxel_size).astype(np.int32)
+        _, unique_indices = np.unique(discrete_coords, axis=0, return_index=True)
 
-        points = PointCloud2()
-        # points.header = msg.header
-        # points.points = self.points_array.tolist()
-        points = pc2.create_cloud_xyz32(msg.header, self.points_array.tolist())
-
-        self.publisher_points.publish(points)
-        
+        points = points[unique_indices]
+        self.points_array = np.array([points[:,0], -points[:,1], -points[:,2]]).T        
 
         if len(self.points_array) < 1:
             self.consFlag = False
         else:
             self.genConsMatrix()
+
+        pcl = PointCloud2()
+        pcl = pc2.create_cloud_xyz32(msg.header, points.tolist())
+        self.publisher_points.publish(pcl)
 
 
     def genConsMatrix(self):
@@ -314,12 +323,14 @@ class OffboardControl(Node):
 
         else:
             self.A = -2*rotated_points
-            self.b = -2.5*(np.sum(rotated_points**2, 1) - 0.52)
+            self.b = -1.5*(np.sum(rotated_points**2, 1) - self.safetyRadius**2)
 
-            self.consFlag = True
+            if self.takeOffFlag:
+                self.consFlag = True
 
 
     def safety_filter(self, desVel):
+        print("Safety ON")
         P = np.eye(3)
         u = cp.Variable(3)
 
@@ -332,7 +343,7 @@ class OffboardControl(Node):
                 val = u.value
 
                 try:
-                    val = np.maximum(-np.array([0.5, 0.5, 0.5]), np.minimum(np.array([0.5, 0.5, 0.5]), val))
+                    val = np.maximum(-np.array([self.maxXVel, self.maxYVel, self.maxZVel]), np.minimum(np.array([self.maxXVel, self.maxYVel, self.maxZVel]), val))
                 except TypeError:
                     print("Safety filter returned None")
                     val = np.array([0.0, 0.0, 0.0])
@@ -368,7 +379,7 @@ class OffboardControl(Node):
         if self.consFlag:
             desVel = self.safety_filter(desVel)
         
-        print(f"value: {desVel[0]:.3f}: {desVel[1]:.3f}:  {desVel[2]:.3f}")
+        # print(f"value: {desVel[0]:.3f}: {desVel[1]:.3f}:  {desVel[2]:.3f}")
 
         derVel = ((self.cur_vel - desVel) - self.errVel)/self.dt
         self.errVel = self.cur_vel - desVel
@@ -421,47 +432,28 @@ class OffboardControl(Node):
         if self.landFlag:
             self.set_land()
         else:
-            if self.odomFlag == True and self.lioFlag == True: 
+            if self.odomFlag == True and self.lioFlag == True and self.controlFlag == True:
                 self.mode()
                 if(self.armed == 2 and self.offboard_mode == True):
                     self.arm_flag = True
-                    if self.landFlag:
-                        # # landingTime = Clock().now().nanoseconds/1E9 - self.landTime
-                        # if self.cur_vel[2] < 0.05:
-                        #     self.norm_thrust_const = self.norm_thrust_const - 0.0003
-                        # if self.cur_vel[2] > 0.2:
-                        #     self.norm_thrust_const = self.norm_thrust_const + 0.0003
 
-                        # des_a = self.gravity[2]
-                        # thrust = self.norm_thrust_const * des_a + 1
+                    des_a = self.a_des()
 
-                        # if self.cur_pose[2] > -0.35:
-                        #     thrust = 0.0
+                    yaw_rad = self.yaw_sp
 
+                    yaw_diff = yaw_rad - self.yaw
+                    yaw_diff = np.maximum(-0.05, np.minimum(0.05, yaw_diff))
 
+                    yaw_ref = self.yaw + yaw_diff
 
-                        # quat_des = quaternion_from_euler(0.0, 0.0, self.yaw)
-                        self.set_land()
+                    r_des = self.acc2quat(des_a, 0.0)
 
+                    zb = r_des[:,2]
+                    quat_des = quaternion_from_euler(des_a[1], -des_a[0], yaw_ref)
 
-                    else:
-                        des_a = self.a_des()
-
-                        yaw_rad = self.yaw_sp
-
-                        yaw_diff = yaw_rad - self.yaw
-                        yaw_diff = np.maximum(-0.05, np.minimum(0.05, yaw_diff))
-
-                        yaw_ref = self.yaw + yaw_diff
-
-                        r_des = self.acc2quat(des_a, 0.0)
-
-                        zb = r_des[:,2]
-                        quat_des = quaternion_from_euler(des_a[1], -des_a[0], yaw_ref)
-
-                        thrust = self.norm_thrust_const * des_a.dot(zb) + 1
-                        thrust = np.maximum(-0.8, np.minimum(thrust, 0.8))
-                        # print(yaw_ref, quat_des[3])
+                    thrust = self.norm_thrust_const * des_a.dot(zb) + 1
+                    thrust = np.maximum(-0.8, np.minimum(thrust, 0.8))
+                    # print(yaw_ref, quat_des[3])
 
                     now = int(Clock().now().nanoseconds/1E3)
 
@@ -472,20 +464,20 @@ class OffboardControl(Node):
                     self.att_cmd.q_d[3] = quat_des[2]
                     
                     self.att_cmd.thrust_body[2] = thrust
-                    # print("thrust: {:.3f}".format(thrust))
+                    print("thrust: {:.3f}".format(thrust))
                     # print(f"value: {des_a[0]:.3f}: {des_a[1]:.3f}:  {des_a[2]:.3f}")
 
                     self.publisher_attitude.publish(self.att_cmd)
                     
 
                 elif self.arm_flag==False:
-                    self.arm_uav() # Use this only in simulation. NEVER USE THIS IN REAL TIME.
+                    self.arm_uav()
                     # self.mode()
                     # print("Not armed yet")
                     pass
 
             else:
-                print(f"Waiting for Odometry: {self.lioFlag}: {self.odomFlag}")
+                print(f"\n\nController waiting: \nDLIO: {self.lioFlag}, \nFMUO: {self.odomFlag}, \nControl: {self.controlFlag}")
                 pass
 
 
