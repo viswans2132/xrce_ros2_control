@@ -107,9 +107,6 @@ class OffboardControl(Node):
         self.home = False
         self.home_pos = np.array([0,0,-0.05])
 
-
-
-
         self.odom_sub = self.create_subscription(VehicleOdometry, '/fmu/out/vehicle_odometry', self.vehicle_odometry_callback, qos_profile)
         self.mode_sub = self.create_subscription(VehicleControlMode, '/fmu/out/vehicle_control_mode', self.vehicle_control_mode_callback, qos_profile)
         self.takeOff_sub = self.create_subscription(String, '/takeoff', self.start_callback, qos_profile_2)
