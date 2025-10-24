@@ -1,81 +1,66 @@
 #!/usr/bin/env python3
-import sys
-import termios
-import tty
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
-
+from pynput import keyboard
 
 class KeyboardTeleop(Node):
     def __init__(self):
         super().__init__('keyboard_teleop')
+        self.publisher_ = self.create_publisher(Twist, '/cmd_vel', 10)
 
-        # Publisher for velocity commands
-        self.pub = self.create_publisher(Twist, '/cmd_vel', 10)
-        self.get_logger().info("Keyboard Teleop started. Use WSAD to move, Q/E to turn, X to stop, CTRL+C to quit.")
+        # Current velocity
+        self.linear_speed = [0.0, 0.0, 0.0]
 
-        self.settings = termios.tcgetattr(sys.stdin)
-        self.linear_speed = 0.5
-        self.angular_speed = 1.0
+        self.get_logger().info(
+            "Keyboard teleop started. Use arrow keys to move x/y, W/S for z. Press ESC to exit."
+        )
 
-        self.run()
+        # Start pynput listener
+        self.listener = keyboard.Listener(on_press=self.on_press)
+        self.listener.start()
 
-    def get_key(self):
-        """Get a single keypress from stdin (non-blocking)."""
-        tty.setraw(sys.stdin.fileno())
-        key = sys.stdin.read(1)
-        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.settings)
-        return key
+        # Publish at 20 Hz
+        self.create_timer(0.05, self.publish_twist)
 
-    def run(self):
-        twist = Twist()
+    def on_press(self, key):
+        try:
+            if key.char == 'w':
+                self.linear_speed[2] += 0.1  # Up
+            elif key.char == 's':
+                self.linear_speed[2] -= 0.1  # Down
+        except AttributeError:
+            # Handle special keys (arrows)
+            if key == keyboard.Key.up:
+                self.linear_speed[0] += 0.1  # Forward x+
+            elif key == keyboard.Key.down:
+                self.linear_speed[0] -= 0.1  # Backward x-
+            elif key == keyboard.Key.right:
+                self.linear_speed[1] -= 0.1  # Right y-
+            elif key == keyboard.Key.left:
+                self.linear_speed[1] += 0.1  # Left y+
+            elif key == keyboard.Key.esc:
+                self.get_logger().info("Exiting teleop...")
+                rclpy.shutdown()
 
-        while rclpy.ok():
-            key = self.get_key()
+        self.get_logger().info(
+            f"Velocities: x={self.linear_speed[0]:.2f}, y={self.linear_speed[1]:.2f}, z={self.linear_speed[2]:.2f}"
+        )
 
-            if key.lower() == 'w':
-                twist.linear.x = self.linear_speed
-                twist.angular.z = 0.0
-            elif key.lower() == 's':
-                twist.linear.x = -self.linear_speed
-                twist.angular.z = 0.0
-            elif key.lower() == 'a':
-                twist.linear.x = 0.0
-                twist.angular.z = self.angular_speed
-            elif key.lower() == 'd':
-                twist.linear.x = 0.0
-                twist.angular.z = -self.angular_speed
-            elif key.lower() == 'x':
-                twist.linear.x = 0.0
-                twist.angular.z = 0.0
-            elif key.lower() == 'q':
-                twist.linear.x = 0.0
-                twist.angular.z = self.angular_speed * 1.5
-            elif key.lower() == 'e':
-                twist.linear.x = 0.0
-                twist.angular.z = -self.angular_speed * 1.5
-            elif key == '\x03':  # CTRL+C
-                break
-            else:
-                continue
-
-            self.pub.publish(twist)
-            self.get_logger().info(
-                f"Published cmd_vel: linear={twist.linear.x:.2f}, angular={twist.angular.z:.2f}"
-            )
-
-        twist = Twist()  # Stop before exiting
-        self.pub.publish(twist)
-        self.get_logger().info("Keyboard teleop stopped. Robot halted.")
+    def publish_twist(self):
+        msg = Twist()
+        msg.linear.x = self.linear_speed[0]
+        msg.linear.y = self.linear_speed[1]
+        msg.linear.z = self.linear_speed[2]
+        self.publisher_.publish(msg)
 
 
-def main(args=None):
-    rclpy.init(args=args)
+def main():
+    rclpy.init()
     node = KeyboardTeleop()
-    node.destroy_node()
+    rclpy.spin(node)
     rclpy.shutdown()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
