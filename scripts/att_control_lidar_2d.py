@@ -3,7 +3,7 @@
 __author__ = "Viswa Narayanan Sankaranrayanan"
 __contact__ = "vissan@ltu.se"
 
-HW_TEST = True # Make this true before using hardware
+HW_TEST = False # Make this true before using hardware
 EXT_ODOM_SOURCE = "REALSENSE" # Make this "REALSENSE", while using realsense topics
 EXT_ARMING = False # Make this true, if you want arming to be done from the remote control. Otherwise, this node will call an arming service.
 
@@ -138,6 +138,9 @@ class OffboardControl(Node):
             if EXT_ODOM_SOURCE == "REALSENSE":
                 self.ext_odom_sub = self.create_subscription(Odometry, '/ov_msckf/odomimu', self.ext_odom_callback, qos_profile_3)
                 self.ext_timer = self.create_timer(0.1, self.ext_odom_check)
+        else:
+            self.relayFlag = True
+            self.controlFlag = True
 
         self.mode()
 
@@ -459,8 +462,12 @@ class OffboardControl(Node):
                     self.att_cmd.q_d[1] = quat_des[0]
                     self.att_cmd.q_d[2] = quat_des[1]
                     self.att_cmd.q_d[3] = quat_des[2]
+                    self.att_cmd.q_d[0] = 0.18
+                    self.att_cmd.q_d[1] = 0.36
+                    self.att_cmd.q_d[2] = 0.55
+                    self.att_cmd.q_d[3] = 0.73
                     
-                    self.att_cmd.thrust_body[2] = thrust
+                    self.att_cmd.thrust_body[2] = 0.5
                     # print("thrust: {:.3f}".format(thrust))
                     # print(f"value: {des_a[0]:.3f}: {des_a[1]:.3f}:  {des_a[2]:.3f}")
 

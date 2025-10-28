@@ -480,16 +480,16 @@ class OffboardControl(Node):
                     self.thrust_cmd.timestamp_sample = now
                     self.torque_cmd.timestamp_sample = now
                     
-                    self.thrust_cmd.xyz[0] = 0.1
-                    self.thrust_cmd.xyz[1] = 0.2
-                    self.thrust_cmd.xyz[2] = 0.3
+                    self.thrust_cmd.xyz[0] = 0.0
+                    self.thrust_cmd.xyz[1] = 0.0
+                    self.thrust_cmd.xyz[2] = thrust
                     
                     self.torque_cmd.xyz[0] = des_t[0]
                     self.torque_cmd.xyz[1] = des_t[1]
                     self.torque_cmd.xyz[2] = des_t[2]
-                    self.torque_cmd.xyz[0] = 0.01
-                    self.torque_cmd.xyz[1] = 0.02
-                    self.torque_cmd.xyz[2] = 0.03
+                    # self.torque_cmd.xyz[0] = 0.0
+                    # self.torque_cmd.xyz[1] = 0.0
+                    # self.torque_cmd.xyz[2] = 0.0
                     
                     self.publisher_thrust.publish(self.thrust_cmd)
                     self.publisher_torque.publish(self.torque_cmd)
