@@ -3,7 +3,7 @@
 __author__ = "Viswa Narayanan Sankaranrayanan"
 __contact__ = "vissan@ltu.se"
 
-HW_TEST = False # Make this true before using hardware
+HW_TEST = True # Make this true before using hardware
 EXT_ODOM_SOURCE = "REALSENSE" # Make this "REALSENSE", while using realsense topics
 EXT_ARMING = False # Make this true, if you want arming to be done from the remote control. Otherwise, this node will call an arming service.
 
