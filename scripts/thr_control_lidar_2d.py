@@ -4,7 +4,7 @@ __author__ = "Viswa Narayanan Sankaranrayanan"
 __contact__ = "vissan@ltu.se"
 
 HW_TEST = True # Make this true before using hardware
-EXT_ODOM_SOURCE = "REALSENSE" # Make this "REALSENSE", while using realsense topics
+EXT_ODOM_SOURCE = "VICON" # Make this "REALSENSE", while using realsense topics
 EXT_ARMING = False # Make this true, if you want arming to be done from the remote control. Otherwise, this node will call an arming service.
 
 import rclpy
@@ -55,7 +55,7 @@ class OffboardControl(Node):
         self.safetyRadius = 1.0 # meters
         self.pos_sp = np.array([0.0, 0.0, 0.0])
 
-        self.des_pos = np.array([0.0, 0.0, -0.8])
+        self.des_pos = np.array([0.0, 0.0, -0.7])
         self.errInt = np.array([0.0, 0.0, 0.0])
 
         self.lidar_rel_pos = np.array([0.12, 0.0, 0.26])
@@ -100,14 +100,14 @@ class OffboardControl(Node):
         self.maxZVel = 0.3
 
         # Gains
-        self.Kpos = np.array([-0.9, -0.9, -1.2])
+        self.Kpos = np.array([-0.5, -0.5, -1.2])
         self.Kvel = np.array([-0.3, -0.3, -1.0])
         self.Kder = np.array([-0.0, -0.0, -0.0])
-        self.Kint = np.array([-0.0, -0.0, -0.4])
+        self.Kint = np.array([-0.0, -0.0, -0.0])
 
-        self.Kq = np.array([-0.6, -0.6, -0.03])
-        self.Kqd = np.array([-0.1, -0.1, -0.01])
-        self.norm_thrust_const = 0.15
+        self.Kq = np.array([-0.6, -0.6, -0.1])
+        self.Kqd = np.array([-0.1, -0.1, -0.02])
+        self.norm_thrust_const = 0.17
 
         # Constants and cutoff values
         self.gravity = np.array([0, 0, -10.0])
@@ -146,6 +146,10 @@ class OffboardControl(Node):
             if EXT_ODOM_SOURCE == "REALSENSE":
                 self.ext_odom_sub = self.create_subscription(Odometry, '/ov_msckf/odomimu', self.ext_odom_callback, qos_profile_3)
                 self.ext_timer = self.create_timer(0.1, self.ext_odom_check)
+            elif EXT_ODOM_SOURCE == "VICON":
+                # self.ext_odom_sub = self.create_subscription(Odometry, '/rigid_bodies', self.ext_odom_callback, qos_profile_3)
+                # self.ext_timer = self.create_timer(0.1, self.ext_odom_check)
+                self.relayFlag = True
         else:
             self.relayFlag = True
             self.controlFlag = True
@@ -172,11 +176,15 @@ class OffboardControl(Node):
             print("Odom")
             self.pos_sp[0] = msg.position[0]
             self.pos_sp[1] = msg.position[1]
+            self.des_pos[0] = self.pos_sp[0]
+            self.des_pos[1] = self.pos_sp[1]
             self.odomFlag = True
         self.cur_pos = np.array([msg.position[0], msg.position[1], msg.position[2]])
         self.cur_vel = np.array([msg.velocity[0], msg.velocity[1], msg.velocity[2]])
         self.cur_orien = np.array([msg.q[1], msg.q[2], msg.q[3], msg.q[0]])
-        self.yaw = euler_from_quaternion([msg.q[1], msg.q[2], msg.q[3], msg.q[0]])[2]
+        q = self.cur_orien
+        self.yaw = np.arctan2(2 * (q[3]*q[2] + q[0]*q[1]), 1 - 2 * (q[1]**2 + q[2]**2))
+        print(f"yaw: {self.yaw:.2f}")
         self.R = quaternion_matrix([msg.q[1], msg.q[2], msg.q[3], msg.q[0]])[:-1, :-1]
         self.ang_vel = np.array([msg.angular_velocity[0], msg.angular_velocity[1], msg.angular_velocity[2]])
 
@@ -184,8 +192,6 @@ class OffboardControl(Node):
             if not self.takeOffFlag:
                 print("Takeoff detected")                
             self.takeOffFlag = True
-            self.des_pos[0] = self.pos_sp[0]
-            self.des_pos[1] = self.pos_sp[1]
 
     def relay_callback(self, msg):
         if not self.relayFlag:
@@ -428,7 +434,7 @@ class OffboardControl(Node):
 
 
     def acc2quat(self,des_a, des_yaw):
-        xb_des = np.array([1, 0, 0.0])
+        xb_des = np.array([np.cos(des_yaw), np.sin(des_yaw), 0.0])
         if np.linalg.norm(des_a) == 0.0:
             zb_des = np.array([0,0,1])
         else:    
@@ -458,18 +464,18 @@ class OffboardControl(Node):
 
                     yaw_ref = self.yaw + yaw_diff
 
-                    r_des = self.acc2quat(des_a, 0.0)
+                    r_des = self.acc2quat(des_a, yaw_ref)
                     e_R = 0.5*(r_des.T.dot(self.R) - self.R.T.dot(r_des))
                     e_q = np.array([e_R[2,1], e_R[0,2], e_R[1,0]])
                     e_qd = self.ang_vel
 
                     des_t = self.Kq*e_q + self.Kqd*e_qd + np.cross(self.ang_vel, self.inertia*self.ang_vel)
-                    max_torq = np.array([0.1, 0.1, 0.02])
+                    max_torq = np.array([0.2, 0.2, 0.05])
                     des_t = np.maximum(-max_torq, np.minimum(max_torq, des_t))
 
                     
                     thrust = self.norm_thrust_const * des_a.dot(r_des[:,2]) + 1
-                    thrust = np.maximum(-0.9, np.minimum(thrust, 0.9))
+                    thrust = np.maximum(-0.7, np.minimum(thrust, 0.7))
                     # print(thrust)
 
 
