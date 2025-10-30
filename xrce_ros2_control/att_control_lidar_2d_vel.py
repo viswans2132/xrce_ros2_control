@@ -52,6 +52,16 @@ class OffboardControl(Node):
         depth=1
         )
 
+        self.declare_parameter('hw_test', HW_TEST)
+        self.declare_parameter('ext_odom_source', EXT_ODOM_SOURCE)
+        self.declare_parameter('ext_arming', EXT_ARMING)
+        self.declare_parameter('auto_start', AUTO_START)
+
+        self.hw_test = bool(self.get_parameter('hw_test').value)
+        self.ext_odom_source = self.get_parameter('ext_odom_source').get_parameter_value().string_value
+        self.ext_arming = bool(self.get_parameter('ext_arming').value)
+        self.auto_start = bool(self.get_parameter('auto_start').value)
+
 
         self.safetyRadius = 1.0 # meters
         self.vel_sp = np.array([0.0, 0.0, 0.0])
@@ -133,12 +143,18 @@ class OffboardControl(Node):
 
         self.ext_odom_time = time.time()
 
-        if HW_TEST:
+        if self.hw_test:
             self.relay_sub = self.create_subscription(VehicleOdometry, '/fmu/in/vehicle_visual_odometry', self.relay_callback, qos_profile)
 
-            if EXT_ODOM_SOURCE == "REALSENSE":
+            if self.ext_odom_source == "REALSENSE":
                 self.ext_odom_sub = self.create_subscription(Odometry, '/ov_msckf/odomimu', self.ext_odom_callback, qos_profile_3)
                 self.ext_timer = self.create_timer(0.1, self.ext_odom_check)
+        else:
+            self.relayFlag = True
+
+        if self.auto_start:
+            self.controlFlag = True
+
 
         self.mode()
 

@@ -6,6 +6,7 @@ __contact__ = "vissan@ltu.se"
 HW_TEST = True # Make this true before using hardware
 EXT_ODOM_SOURCE = "VICON" # Make this "REALSENSE", while using realsense topics
 EXT_ARMING = False # Make this true, if you want arming to be done from the remote control. Otherwise, this node will call an arming service.
+AUTO_START = False # Make this true, if you want the controller to run without waiting for the takeoff signal.
 
 import rclpy
 import numpy as np
@@ -50,6 +51,16 @@ class OffboardControl(Node):
         history=QoSHistoryPolicy.KEEP_LAST,
         depth=1
         )
+
+        self.declare_parameter('hw_test', HW_TEST)
+        self.declare_parameter('ext_odom_source', EXT_ODOM_SOURCE)
+        self.declare_parameter('ext_arming', EXT_ARMING)
+        self.declare_parameter('auto_start', AUTO_START)
+
+        self.hw_test = bool(self.get_parameter('hw_test').value)
+        self.ext_odom_source = self.get_parameter('ext_odom_source').get_parameter_value().string_value
+        self.ext_arming = bool(self.get_parameter('ext_arming').value)
+        self.auto_start = bool(self.get_parameter('auto_start').value)
 
 
         self.safetyRadius = 1.0 # meters
@@ -100,13 +111,13 @@ class OffboardControl(Node):
         self.maxZVel = 0.3
 
         # Gains
-        self.Kpos = np.array([-0.5, -0.5, -1.2])
-        self.Kvel = np.array([-0.3, -0.3, -1.0])
+        self.Kpos = np.array([-0.9, -0.9, -1.2])
+        self.Kvel = np.array([-0.5, -0.5, -1.0])
         self.Kder = np.array([-0.0, -0.0, -0.0])
         self.Kint = np.array([-0.0, -0.0, -0.0])
 
-        self.Kq = np.array([-0.6, -0.6, -0.1])
-        self.Kqd = np.array([-0.1, -0.1, -0.02])
+        self.Kq = np.array([-0.6, -0.6, -0.6])
+        self.Kqd = np.array([-0.1, -0.1, -0.1])
         self.norm_thrust_const = 0.17
 
         # Constants and cutoff values
@@ -140,18 +151,20 @@ class OffboardControl(Node):
 
         self.ext_odom_time = time.time()
 
-        if HW_TEST:
+        if self.hw_test:
             self.relay_sub = self.create_subscription(VehicleOdometry, '/fmu/in/vehicle_visual_odometry', self.relay_callback, qos_profile)
 
-            if EXT_ODOM_SOURCE == "REALSENSE":
+            if self.ext_odom_source == "REALSENSE":
                 self.ext_odom_sub = self.create_subscription(Odometry, '/ov_msckf/odomimu', self.ext_odom_callback, qos_profile_3)
                 self.ext_timer = self.create_timer(0.1, self.ext_odom_check)
-            elif EXT_ODOM_SOURCE == "VICON":
+            elif self.ext_odom_source == "VICON":
                 # self.ext_odom_sub = self.create_subscription(Odometry, '/rigid_bodies', self.ext_odom_callback, qos_profile_3)
                 # self.ext_timer = self.create_timer(0.1, self.ext_odom_check)
                 self.relayFlag = True
         else:
             self.relayFlag = True
+
+        if self.auto_start:
             self.controlFlag = True
 
         self.mode()
@@ -174,17 +187,15 @@ class OffboardControl(Node):
     def vehicle_odometry_callback(self, msg):
         if self.odomFlag == False:
             print("Odom")
-            self.pos_sp[0] = msg.position[0]
-            self.pos_sp[1] = msg.position[1]
-            self.des_pos[0] = self.pos_sp[0]
-            self.des_pos[1] = self.pos_sp[1]
+            self.des_pos[0] = msg.position[0]
+            self.des_pos[1] = msg.position[1]
             self.odomFlag = True
         self.cur_pos = np.array([msg.position[0], msg.position[1], msg.position[2]])
         self.cur_vel = np.array([msg.velocity[0], msg.velocity[1], msg.velocity[2]])
         self.cur_orien = np.array([msg.q[1], msg.q[2], msg.q[3], msg.q[0]])
         q = self.cur_orien
-        self.yaw = np.arctan2(2 * (q[3]*q[2] + q[0]*q[1]), 1 - 2 * (q[1]**2 + q[2]**2))
-        print(f"yaw: {self.yaw:.2f}")
+        self.yaw = np.arctan2(2 * (q[3]*q[2] + q[0]*q[1]), 1 - 2 * (q[1]**2 + q[2]**2)) 
+        # print(f"yaw: {self.yaw:.2f}")
         self.R = quaternion_matrix([msg.q[1], msg.q[2], msg.q[3], msg.q[0]])[:-1, :-1]
         self.ang_vel = np.array([msg.angular_velocity[0], msg.angular_velocity[1], msg.angular_velocity[2]])
 
@@ -192,6 +203,8 @@ class OffboardControl(Node):
             if not self.takeOffFlag:
                 print("Takeoff detected")                
             self.takeOffFlag = True
+            self.des_pos[0] = self.pos_sp[0]
+            self.des_pos[1] = self.pos_sp[1]
 
     def relay_callback(self, msg):
         if not self.relayFlag:
@@ -422,7 +435,7 @@ class OffboardControl(Node):
         des_a[2] = self.Kvel[2]*self.errVel[2] + self.Kder[2]*derVel[2] + self.Kint[2]*self.errInt[2]
 
         dA = np.zeros((3,))
-        dA = R.dot(des_a)
+        dA = des_a
 
         max_des = np.array([0.2, 0.2, 5])
         dA = np.maximum(-max_des,(np.minimum(max_des, dA)))
@@ -460,7 +473,7 @@ class OffboardControl(Node):
 
                     yaw_rad = self.yaw_sp
                     yaw_diff = yaw_rad - self.yaw
-                    yaw_diff = np.maximum(-0.05, np.minimum(0.05, yaw_diff))
+                    yaw_diff = np.maximum(-0.3, np.minimum(0.3, yaw_diff))
 
                     yaw_ref = self.yaw + yaw_diff
 
@@ -475,7 +488,7 @@ class OffboardControl(Node):
 
                     
                     thrust = self.norm_thrust_const * des_a.dot(r_des[:,2]) + 1
-                    thrust = np.maximum(-0.7, np.minimum(thrust, 0.7))
+                    thrust = np.maximum(-0.9, np.minimum(thrust, 0.9))
                     # print(thrust)
 
 
@@ -493,9 +506,8 @@ class OffboardControl(Node):
                     self.torque_cmd.xyz[0] = des_t[0]
                     self.torque_cmd.xyz[1] = des_t[1]
                     self.torque_cmd.xyz[2] = des_t[2]
-                    # self.torque_cmd.xyz[0] = 0.0
-                    # self.torque_cmd.xyz[1] = 0.0
-                    # self.torque_cmd.xyz[2] = 0.0
+
+                    print(f"Torques: {des_t[0]:.3f}, {des_t[1]:.3f}, {des_t[2]:.3f}, ")
                     
                     self.publisher_thrust.publish(self.thrust_cmd)
                     self.publisher_torque.publish(self.torque_cmd)

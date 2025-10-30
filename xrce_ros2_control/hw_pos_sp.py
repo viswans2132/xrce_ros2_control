@@ -3,6 +3,12 @@
 __author__ = "Viswa Narayanan Sankaranarayanan"
 __contact__ = "vissan@ltu.se"
 
+
+HW_TEST = True # Make this true before using hardware
+EXT_ODOM_SOURCE = "REALSENSE" # Make this "REALSENSE", while using realsense topics
+EXT_ARMING = False # Make this true, if you want arming to be done from the remote control. Otherwise, this node will call an arming service.
+
+
 import rclpy
 import numpy as np
 from tf_transformations import *
@@ -41,20 +47,15 @@ class PositionSpFilter(Node):
         # Nodes
         self.node = rclpy.create_node('control_class')
         self.declare_parameter('drone_name', 'shafterx2')
+        self.declare_parameter('hw_test', HW_TEST)
+        self.declare_parameter('ext_odom_source', EXT_ODOM_SOURCE)
+        self.declare_parameter('ext_arming', EXT_ARMING)
+
+
         self.drone_name = self.get_parameter('drone_name').get_parameter_value().string_value
-
-        # Subscribers
-        self.odomSub = self.create_subscription(VehicleOdometry, '/fmu/out/vehicle_odometry', self.vehicle_odometry_callback, qos_profile_transient)
-        self.relaySub = self.create_subscription(VehicleOdometry, '/fmu/in/vehicle_visual_odometry', self.relay_callback, qos_profile_transient)
-        self.posSpSub = self.create_subscription(PoseStamped, f'/{self.drone_name}/command/pose', self.sp_callback, qos_profile_volatile_reliable)
-        
-        #Publishers
-        self.posSpPub = self.create_publisher(PoseStamped, '/ref', qos_profile_volatile_reliable)
-
-
-        timerPeriod = 0.02  # seconds
-        self.timer = self.create_timer(timerPeriod, self.cmdloop_callback)
-
+        self.hw_test = bool(self.get_parameter('hw_test').value)
+        self.ext_odom_source = self.get_parameter('ext_odom_source').get_parameter_value().string_value
+        self.ext_arming = bool(self.get_parameter('ext_arming').value)
 
         # initial values for setpoints
         self.curPos = np.zeros((3,))
@@ -69,6 +70,7 @@ class PositionSpFilter(Node):
         self.yawSp = 0.0
 
         # Time parameters
+        timerPeriod = 0.02  # seconds
         self.preTime = Clock().now().nanoseconds/1E9
         self.offboardTime = Clock().now().nanoseconds/1E9
         self.dt = timerPeriod
@@ -76,7 +78,6 @@ class PositionSpFilter(Node):
 
         # Msg Variables
         self.posSpMsg = PoseStamped()
-
 
         # Flags
         self.offbFlag = False
@@ -88,12 +89,23 @@ class PositionSpFilter(Node):
         self.home = False
 
         self.takeoffThreshold = 0.75
-
         
         print("Sleeping")
         time.sleep(2)
         print("Awake")
 
+        # Subscribers
+        self.odomSub = self.create_subscription(VehicleOdometry, '/fmu/out/vehicle_odometry', self.vehicle_odometry_callback, qos_profile_transient)
+        self.posSpSub = self.create_subscription(PoseStamped, f'/{self.drone_name}/command/pose', self.sp_callback, qos_profile_volatile_reliable)
+        if self.hw_test:
+            self.relaySub = self.create_subscription(VehicleOdometry, '/fmu/in/vehicle_visual_odometry', self.relay_callback, qos_profile_transient)
+        else:
+            self.relayFlag = True
+        
+        #Publishers
+        self.posSpPub = self.create_publisher(PoseStamped, '/ref', qos_profile_volatile_reliable)
+
+        self.timer = self.create_timer(timerPeriod, self.cmdloop_callback)
         
 
     def relay_callback(self, msg):

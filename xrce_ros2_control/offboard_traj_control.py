@@ -6,6 +6,7 @@ __contact__ = "vissan@ltu.se"
 HW_TEST = True # Make this true before using hardware
 EXT_ODOM_SOURCE = "REALSENSE" # Make this "REALSENSE", while using realsense topics
 EXT_ARMING = False # Make this true, if you want arming to be done from the remote control. Otherwise, this node will call an arming service.
+AUTO_START = False # Make this true, if you want arming to be done from the remote control. Otherwise, this node will call an arming service.
 
 import rclpy
 import numpy as np
@@ -53,6 +54,16 @@ class OffboardControl(Node):
         history=QoSHistoryPolicy.KEEP_LAST,
         depth=1
         )
+
+        self.declare_parameter('hw_test', HW_TEST)
+        self.declare_parameter('ext_odom_source', EXT_ODOM_SOURCE)
+        self.declare_parameter('ext_arming', EXT_ARMING)
+        self.declare_parameter('auto_start', AUTO_START)
+
+        self.hw_test = bool(self.get_parameter('hw_test').value)
+        self.ext_odom_source = self.get_parameter('ext_odom_source').get_parameter_value().string_value
+        self.ext_arming = bool(self.get_parameter('ext_arming').value)
+        self.auto_start = bool(self.get_parameter('auto_start').value)
 
         timer_period = 0.02  # seconds
 
@@ -126,12 +137,17 @@ class OffboardControl(Node):
 
         self.ext_odom_time = time.time()
 
-        if HW_TEST:
+        if self.hw_test:
             self.relay_sub = self.create_subscription(VehicleOdometry, '/fmu/in/vehicle_visual_odometry', self.relay_callback, qos_profile)
 
-            if EXT_ODOM_SOURCE == "REALSENSE":
+            if self.ext_odom_source == "REALSENSE":
                 self.ext_odom_sub = self.create_subscription(Odometry, '/ov_msckf/odomimu', self.ext_odom_callback, qos_profile_3)
                 self.ext_timer = self.create_timer(0.1, self.ext_odom_check)
+        else:
+            self.relayFlag = True
+
+        if self.auto_start:
+            self.controlFlag = True
 
 
         self.mode()
@@ -160,7 +176,7 @@ class OffboardControl(Node):
         # print(msg.flag_control_offboard_enabled)
         self.offboard_mode = msg.flag_control_offboard_enabled
         self.armed = msg.flag_armed
-        print(['offboard:',msg.flag_control_offboard_enabled])
+        # print(['offboard:',msg.flag_control_offboard_enabled])
 
     def vehicle_odometry_callback(self, msg):
         if self.odomFlag == False:
@@ -247,8 +263,8 @@ class OffboardControl(Node):
         # Set offboard mode to position control
         offboard_msg = OffboardControlMode()
         offboard_msg.timestamp = int(Clock().now().nanoseconds / 1000)
-        offboard_msg.position=False
-        offboard_msg.velocity=True
+        offboard_msg.position=True
+        offboard_msg.velocity=False
         offboard_msg.acceleration=False
         offboard_msg.attitude=False
         offboard_msg.body_rate=False
@@ -261,7 +277,7 @@ class OffboardControl(Node):
         else:
             if self.odomFlag and self.relayFlag and self.controlFlag:
                 self.mode()
-                print(f"Odometry Flag: {self.odomFlag}, FMU Relay Flag: {self.relayFlag}, Control Flag: {self.controlFlag}")
+                # print(f"Odometry Flag: {self.odomFlag}, FMU Relay Flag: {self.relayFlag}, Control Flag: {self.controlFlag}")
 
                 if(self.armed and self.offboard_mode == True):
                     self.arm_flag = True
@@ -271,7 +287,10 @@ class OffboardControl(Node):
                     trajectory_msg.timestamp = int(Clock().now().nanoseconds / 1000)
                     trajectory_msg.position[0] = self.pos_sp[0] # + self.radius * np.cos(self.theta)
                     trajectory_msg.position[1] = self.pos_sp[1] # + self.radius * np.sin(self.theta)
-                    trajectory_msg.position[2] = self.pos_sp[2] 
+                    trajectory_msg.position[2] = self.pos_sp[2]
+
+                    trajectory_msg.yaw = 0.0
+                    trajectory_msg.yawspeed = -0.1
                     # trajectory_msg.velocity[0] = float("nan")
                     # trajectory_msg.velocity[1] = float("nan")
                     # trajectory_msg.velocity[2] = float("nan")

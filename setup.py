@@ -1,4 +1,7 @@
 from setuptools import setup
+import os
+import glob  # <-- add this line
+from setuptools import find_packages
 
 package_name = 'xrce_ros2_control'
 
@@ -11,7 +14,7 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         # Launch files
-        (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
+        (os.path.join('share', package_name, 'launch'), glob.glob('launch/*.launch.py')),
     ],
     install_requires=[
         'setuptools',
@@ -40,7 +43,7 @@ setup(
             'pos_controller = xrce_ros2_control.offboard_traj_control:main',
             'vel_controller = xrce_ros2_control.vel_controller:main',
             'keyboard_teleop = xrce_ros2_control.keyboard_teleop:main',
-            'pos_sp_filter = xrce_ros2_control.hw_pos_sp'
+            'pos_sp_filter = xrce_ros2_control.hw_pos_sp:main'
         ],
     },
 )
