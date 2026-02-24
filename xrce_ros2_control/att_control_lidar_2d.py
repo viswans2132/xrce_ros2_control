@@ -6,7 +6,7 @@ __contact__ = "vissan@ltu.se"
 HW_TEST = False # Make this true before using hardware
 EXT_ODOM_SOURCE = "REALSENSE" # Make this "REALSENSE", while using realsense topics
 EXT_ARMING = False # Make this true, if you want arming to be done from the remote control. Otherwise, this node will call an arming service.
-AUTO_START = False # Make this true, if you want the controller to run without waiting for the takeoff signal.
+AUTO_START = True # Make this true, if you want the controller to run without waiting for the takeoff signal.
 
 import rclpy
 import numpy as np

@@ -6,7 +6,7 @@ __contact__ = "vissan@ltu.se"
 HW_TEST = True # Make this true before using hardware
 EXT_ODOM_SOURCE = "VICON" # Make this "REALSENSE", while using realsense topics
 EXT_ARMING = False # Make this true, if you want arming to be done from the remote control. Otherwise, this node will call an arming service.
-AUTO_START = False # Make this true, if you want the controller to run without waiting for the takeoff signal.
+AUTO_START = True # Make this true, if you want the controller to run without waiting for the takeoff signal.
 
 import rclpy
 import numpy as np
@@ -426,7 +426,7 @@ class OffboardControl(Node):
         self.errVel = self.cur_vel - desVel
         self.errInt = self.errInt + self.errVel*self.dt
 
-        max_int = np.array([2, 2, 6])
+        max_int = np.array([0, 0, 0])
         self.errInt = np.maximum(-max_int, np.minimum(max_int, self.errInt))
 
         des_a = np.zeros((3,))
