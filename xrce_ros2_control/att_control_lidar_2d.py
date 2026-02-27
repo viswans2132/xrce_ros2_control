@@ -66,7 +66,7 @@ class OffboardControl(Node):
         self.safetyRadius = 1.0 # meters
         self.pos_sp = np.array([0.0, 0.0, 0.0])
 
-        self.des_pos = np.array([0.0, 0.0, -0.8])
+        self.des_pos = np.array([0.5, 1.0, -0.8])
         self.errInt = np.array([0.0, 0.0, 0.0])
 
         self.lidar_rel_pos = np.array([0.12, 0.0, 0.26])
@@ -175,8 +175,8 @@ class OffboardControl(Node):
     def vehicle_odometry_callback(self, msg):
         if self.odomFlag == False:
             print("Odom")
-            self.pos_sp[0] = msg.position[0]
-            self.pos_sp[1] = msg.position[1]
+            # self.pos_sp[0] = msg.position[0]
+            # self.pos_sp[1] = msg.position[1]
             self.odomFlag = True
         self.cur_pos = np.array([msg.position[0], msg.position[1], msg.position[2]])
         self.cur_vel = np.array([msg.velocity[0], msg.velocity[1], msg.velocity[2]])
@@ -186,8 +186,8 @@ class OffboardControl(Node):
             if not self.takeOffFlag:
                 print("Takeoff detected")                
             self.takeOffFlag = True
-            self.des_pos[0] = self.pos_sp[0]
-            self.des_pos[1] = self.pos_sp[1]
+            # self.des_pos[0] = self.pos_sp[0]
+            # self.des_pos[1] = self.pos_sp[1]
 
     def relay_callback(self, msg):
         if not self.relayFlag:
