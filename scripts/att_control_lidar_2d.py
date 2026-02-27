@@ -136,7 +136,7 @@ class OffboardControl(Node):
             qos_profile)
         self.publisher_points = self.create_publisher(PointCloud2, '/reduced_points', laser_qos)
 
-        self.posSpSub = self.create_subscription(PoseStamped, '/ref', self.sp_position_callback, laser_qos)
+        self.posSpSub = self.create_subscription(PoseStamped, '/ref_pose', self.sp_position_callback, laser_qos)
         self.publisher_attitude = self.create_publisher(VehicleAttitudeSetpoint, '/fmu/in/vehicle_attitude_setpoint', qos_profile)
 
         print("Sleeping")
@@ -146,13 +146,14 @@ class OffboardControl(Node):
 
 
     def sp_position_callback(self, msg):
-        self.pos_sp[0] = msg.pose.position.x
-        self.pos_sp[1] = -msg.pose.position.y
-        # self.pos_sp[2] = -msg.pose.position.z
-        # quat = np.array([msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z, msg.pose.orientation.w])
-        # self.yaw_sp = -euler_from_quaternion(quat)[2]
-        print("New setpoint received")
-        print(self.pos_sp)
+        self.pos_sp[0] = msg.pose.position.y
+        self.pos_sp[1] = msg.pose.position.x
+        self.des_pos[2] = -msg.pose.position.z
+        quat = np.array([msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z, msg.pose.orientation.w])
+        self.yaw_sp = euler_from_quaternion(quat)[2]
+        # print("New setpoint received")
+        # print(self.pos_sp)
+        print(self.yaw_sp)
 
     def vehicle_control_mode_callback(self, msg):
         self.offboard_mode = msg.flag_control_offboard_enabled
@@ -170,7 +171,7 @@ class OffboardControl(Node):
         self.cur_pos = np.array([msg.position[0],msg.position[1],msg.position[2]])
         self.cur_vel = np.array([msg.velocity[0],msg.velocity[1],msg.velocity[2]])
         self.cur_orien = np.array([msg.q[1], msg.q[2], msg.q[3], msg.q[0]])
-        self.yaw = euler_from_quaternion([msg.q[1], msg.q[2], msg.q[3], msg.q[0]])[2]
+        self.yaw = -euler_from_quaternion([msg.q[1], msg.q[2], msg.q[3], msg.q[0]])[2]
         if self.cur_pos[2] < -0.45:
             if not self.takeOffFlag:
                 print("Takeoff detected")                
